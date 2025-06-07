@@ -10,28 +10,12 @@ from torch.autograd import Variable
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# Create image folder
-os.makedirs("images", exist_ok=True)
 
-# Hyperparameters
-latent_dim = 100
-img_size = 32
-channels = 1
-n_classes = 10
-embedding_dim = 50
-batch_size = 64
-n_epochs = 200
-sample_interval = 400
-lr = 0.0002
-b1 = 0.5
-b2 = 0.999
 
-img_shape = (channels, img_size, img_size)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Generator
 class Generator(nn.Module):
-    def __init__(self):
+    def __init__(self, latent_dim, img_size, channels, n_classes, embedding_dim, batch_size, n_epochs, sample_interval, lr, b1, b2):
         super().__init__()
         self.label_emb = nn.Embedding(n_classes, embedding_dim)
 
@@ -60,7 +44,7 @@ class Generator(nn.Module):
 
 # Discriminator
 class Discriminator(nn.Module):
-    def __init__(self):
+    def __init__(self, n_classes, img_size, channels):
         super().__init__()
         self.label_emb = nn.Embedding(n_classes, img_size * img_size)
 
@@ -89,86 +73,3 @@ class Discriminator(nn.Module):
         d_in = torch.cat((img, label_input), dim=1)
         return self.model(d_in)
 
-# Loss
-adversarial_loss = nn.BCELoss()
-
-# Initialize models
-generator = Generator().to(device)
-discriminator = Discriminator().to(device)
-
-# Optimizers
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr, betas=(b1, b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
-
-# transform photos
-transform = transforms.Compose([
-    transforms.Resize((img_size, img_size)),  # Assuming img_size is an int
-    transforms.ToTensor(),
-    transforms.Normalize([0.5], [0.5]),
-])
-
-# Data loader
-dataloader = DataLoader(
-    datasets.ImageFolder(
-        root="Dataset/Train",
-        transform=transform
-    ),
-    batch_size=batch_size,
-    shuffle=True,
-)
-
-# Sample generator output
-def sample_image(n_row, batches_done):
-    z = torch.randn(n_row ** 2, latent_dim).to(device)
-    labels = torch.tensor([i for i in range(n_row) for _ in range(n_row)], dtype=torch.long).to(device)
-    gen_imgs = generator(z, labels)
-    save_image(gen_imgs.data, f"images/{batches_done}.png", nrow=n_row, normalize=True)
-
-
-# Training
-g_losses = []
-d_losses = []
-for epoch in range(n_epochs):
-    pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{n_epochs}")
-    epoch_g_loss = 0
-    epoch_d_loss = 0
-
-    for i, (imgs, labels) in enumerate(pbar):
-        real_imgs = imgs.to(device)
-        labels = labels.to(device)
-        batch_size = real_imgs.size(0)
-
-        valid = torch.ones(batch_size, 1, device=device)
-        fake = torch.zeros(batch_size, 1, device=device)
-
-        # Train Generator
-        optimizer_G.zero_grad()
-        z = torch.randn(batch_size, latent_dim, device=device)
-        gen_labels = torch.randint(0, n_classes, (batch_size,), device=device)
-        gen_imgs = generator(z, gen_labels)
-        g_loss = adversarial_loss(discriminator(gen_imgs, gen_labels), valid)
-        g_loss.backward()
-        optimizer_G.step()
-
-        # Train Discriminator
-        optimizer_D.zero_grad()
-        real_loss = adversarial_loss(discriminator(real_imgs, labels), valid)
-        fake_loss = adversarial_loss(discriminator(gen_imgs.detach(), gen_labels), fake)
-        d_loss = (real_loss + fake_loss) / 2
-        d_loss.backward()
-        optimizer_D.step()
-
-        epoch_g_loss += g_loss.item()
-        epoch_d_loss += d_loss.item()
-
-        pbar.set_postfix(D_loss=f"{d_loss.item():.4f}", G_loss=f"{g_loss.item():.4f}")
-
-        if (epoch * len(dataloader) + i) % sample_interval == 0:
-            sample_image(n_row=10, batches_done=epoch * len(dataloader) + i)
-
-    g_losses.append(epoch_g_loss / len(dataloader))
-    d_losses.append(epoch_d_loss / len(dataloader))
-
-
-torch.save(generator.state_dict(), "generator.pth"); 
-torch.save(discriminator.state_dict(), "discriminator.pth"); 
